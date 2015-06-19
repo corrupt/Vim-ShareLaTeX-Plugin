@@ -2,7 +2,7 @@
 
 import vim
 #import os
-import string
+#import string
 import requests
 #import sys # DEBUG
 from BeautifulSoup import BeautifulSoup
@@ -25,28 +25,31 @@ def vimClearScreen():
 
 def vimCursorPos():
 	window = vim.current.window
-	(row,column) = window.cursor 
+	(row,column) = window.cursor
 	return (row,column)
 
 def vimCursorSet(row,col):
 	window = vim.current.window
- 	window.cursor = (row,col)
+	window.cursor = (row,col)
+
+DOMAIN="www.sharelatex.com"
+URL="https://"+DOMAIN
 
 ### All web page related ShareLaTex stuff
 class SharelatexSession:
 	def __init__(self):
 		self.authenticated = False
 		self.httpHandler = requests.Session()
-		
+
 	def login(self,email,password):
 		if not self.authenticated:
 			# ??? It is neccessary to get a certificate from the login page
-			certPage = self.httpHandler.get("https://www.sharelatex.com/login")
+			certPage = self.httpHandler.get(URL + "/login")
 			certPos = certPage.text.find("_csrf")
 			certString = certPage.text[certPos+28:certPos+52]
 			# ??? Filling out the login form
 			formData = {'email': email, 'password': password, '_csrf':certString,'redir':''}
-			redirect  = self.httpHandler.post("https://www.sharelatex.com/login", data=formData)
+			redirect  = self.httpHandler.post(URL + "/login", data=formData)
 			if redirect.text == '{"redir":"/project"}':
 				self.authenticated = True
 				return True
@@ -56,13 +59,13 @@ class SharelatexSession:
 			return False
 
 	# ??? Returns a list of ShareLaTex projects
-	def projectList(self): 
+	def projectList(self):
 		if self.authenticated:
-			projectPage = self.httpHandler.get("https://www.sharelatex.com/project")
+			projectPage = self.httpHandler.get(URL + "/project")
 			# ??? Scraping the page for information
 			projectSoup = BeautifulSoup(projectPage.text)
 			projectEntries = projectSoup.findAll("div",attrs={'class':'project_entry'})
-			
+
 			newList = []
 
 			for entry in projectEntries:
@@ -79,30 +82,30 @@ class SharelatexSession:
 					'date':entryDate,
 					'visibility':visibility,
 					'owner':entryOwner})
-			
+
 			return newList
-	
+
 	# ??? Generate a timstamp with a length of 13 numbers
 	def genTimeStamp(self):
 		t = time.time()
 		t = str(t)
 		t = t[:10]+t[11:]
 		while len(t) < 13:
-		        t += "0"
+			t += "0"
 		return t
 
 	# ??? Returns a object connected to the given project
 	def openProject(self,projectId):
-		if self.authenticated:	
+		if self.authenticated:
 			# ??? Generating timestamp
 			timestamp = self.genTimeStamp()
 
 			# ??? To establish a websocket connection
 			# ??? the client must query for a sec url
-			self.httpHandler.get("https://www.sharelatex.com/project")
-			channelInfo = self.httpHandler.get("https://www.sharelatex.com/socket.io/1/?t="+timestamp)
+			self.httpHandler.get(URL + "/project")
+			channelInfo = self.httpHandler.get(URL + "/socket.io/1/?t="+timestamp)
 			wsChannel = channelInfo.text[0:channelInfo.text.find(":")]
-			wsUrl = u"wss://www.sharelatex.com/socket.io/1/websocket/"+wsChannel
+			wsUrl = u"wss://" + DOMAIN + "/socket.io/1/websocket/"+wsChannel
 			return SharelatexProject(wsUrl,projectId)
 
 ### Handles everything Vim spesific
@@ -126,7 +129,7 @@ class VimSharelatexPlugin:
 
 	def showProjects(self):
 		projectList = self.sharelatex.projectList()
-		
+
 		vimClearScreen()
 		vim.current.buffer.append(" ShareLaTeX")
 		vim.current.buffer.append("________________")
@@ -154,13 +157,13 @@ class VimSharelatexPlugin:
 
 	def navigateProjects(self,direction):
 		if self.page == "project":
-			(row,col) = vimCursorPos()	
-	
+			(row,col) = vimCursorPos()
+
 			if direction == "up" and row !=6:
 				row -= 3
 			elif direction == "down" and row < (len(vim.current.buffer)-3):
 				row += 3
-			
+
 			vimCursorSet(row,col)
 			if direction == "enter":
 				self.openProject(self.projects[(row-6)/3]['id'])
@@ -172,7 +175,7 @@ class VimSharelatexPlugin:
 			char_count += len(line)+1
 		char_count += column
 		return char_count
-	
+
 	# ??? Seperate bufferlines with \n
 	def convToString(self,b):
 		if b == None or len(b) == 0:
@@ -213,10 +216,10 @@ class VimSharelatexPlugin:
 		# ??? Pushing document to vim
 		vim.command("syntax on")
 		vim.command("set filetype=tex")
-		
+
 		self.applyString(serverBuffer)
-		
-		# ??? Returning normal function to these buttons	
+
+		# ??? Returning normal function to these buttons
 		vim.command("nmap <silent> <up> <up>")
 		vim.command("nmap <silent> <down> <down>")
 		vim.command("nmap <silent> <enter> <enter>")
@@ -251,17 +254,17 @@ class VimSharelatexPlugin:
 		return op
 
 # ??? This class provides the interface between
-# ??? Vim and the WebSocket FIFO in com.py. The 
+# ??? Vim and the WebSocket FIFO in com.py. The
 # ??? Inter Process Communication works by having
-# ??? every transmission return a value. 
+# ??? every transmission return a value.
 class IPC:
 	def __init__(self,port):
 		self.context = zmq.Context.instance()
 		self.sock = self.context.socket(zmq.REQ)
 		self.sock.connect('tcp://localhost:8080')
 		self.q = Queue.Queue()
-		
-	def transmitt(self,message="GET"):	
+
+	def transmitt(self,message="GET"):
 		self.sock.send_string(message)
 		try:
 			response = self.sock.recv_string()
@@ -274,7 +277,7 @@ class IPC:
 			exit()
 
 	def send(self,message):
-		response = self.transmitt(message)	
+		response = self.transmitt(message)
 		if response != "FIFO EMPTY":
 			self.q.put(response)
 
@@ -296,7 +299,7 @@ class IPC:
 				return response
 			try_count += 1
 			time.sleep(0.250)
-	
+
 		return -1
 
 	def EmptyInto(self,queue):
@@ -315,7 +318,7 @@ class Document:
 
 class SharelatexProject:
 	def __init__(self,url,projectID):
-		
+
 		# ??? Defining usefull variables
 		self.projectID = projectID
 		self.currentDoc = None
@@ -331,7 +334,7 @@ class SharelatexProject:
 		self.p = sp.Popen(cmd,shell=False)
 		if self.p.poll() == None :
 			print "ALIVE"
-			time.sleep(0.5)	
+			time.sleep(0.5)
 
 		# ??? Establishing a communication channel
 		self.ipc_session = IPC("8080")
@@ -343,15 +346,15 @@ class SharelatexProject:
 		r = self.ipc_session.waitfor("1::",10)
 		if r != "1::":
 			print "CLIENT: No valid response from ShareLaTex server"
-			self.p.kill()	
+			self.p.kill()
 			return
 
 		message = json.dumps({"name":"joinProject","args":[{"project_id":projectID}]})
 		self.send("cmd",message)
 		r = self.ipc_session.waitfor("6:::1+")
-		temp = json.loads(r[r.find("+")+1:len(r)])	
+		temp = json.loads(r[r.find("+")+1:len(r)])
 		data = temp[1]
-		self.rootDoc = data.get(u'rootDoc_id') 
+		self.rootDoc = data.get(u'rootDoc_id')
 
 	def send(self,message_type,message_content=None):
 		if message_type == "update":
@@ -367,19 +370,19 @@ class SharelatexProject:
 		if self.currentDoc != None:
 			temp = json.dumps({"name":"leaveDoc","args":[self.currentDoc.uniqueID]})
 			self.send("cmd",temp)
-		
+
 		self.currentDoc = Document(docID)
-			
+
 		temp = json.dumps({"name":"joinDoc","args":[docID]})
 		self.send("cmd",temp)
 		r = self.ipc_session.waitfor("::")
-		
-		temp = json.loads(r[r.find("+")+1:len(r)])	
+
+		temp = json.loads(r[r.find("+")+1:len(r)])
 		data = temp[1]
-	
+
 		self.serverBuffer = self.toString(data)
 		self.currentDoc.version = temp[2]
-		
+
 		return self.serverBuffer
 
 	# ??? Opens the root document in the project
@@ -393,7 +396,7 @@ class SharelatexProject:
 	def toString(self,b):
 		if b == None or len(b) == 0:
 			return u''
-		
+
 		s = u''
 		for line in b[0:len(b)-1]:
 			s += u''+line +"\n"
@@ -402,7 +405,7 @@ class SharelatexProject:
 		s.replace("	","\t")
 
 		return s
-	
+
 	def get_char_number(self,row,column):
 		char_count = 0
 		for line in vim.current.buffer[:row]:
@@ -432,7 +435,7 @@ class SharelatexProject:
 				}]
 			})
 		self.send("update",message)
-	
+
 	def updateClients(self):
 		return None
 
@@ -481,7 +484,7 @@ class SharelatexProject:
 				j1 = 0
 			if j2 == 'Null':
 				j2 = 0
-			
+
 			if len(a) == 0:
 				a = [""]
 			if len(b) == 0:
@@ -496,7 +499,7 @@ class SharelatexProject:
 					op.append({'p':p,'i':b[j1:j2]})
 				elif tag == "delete":
 					op.append({'p':p,'d':a[i1:i2]})
-				
+
 		return op
 
 	# ??? Decodes the external updates recieved from
@@ -519,13 +522,13 @@ class SharelatexProject:
 			if u'd' in op:
 				p = op[u'p']
 				s = op[u'd']
-		
+
 				buf = buf[:p] + buf[p+len(s):]
 			# ??? Add chars and newlines
 			if u'i' in op:
 				p = op[u'p']
 				s = op[u'i']
-			
+
 				buf = buf[:p] + s + buf[p:]
 		return buf
 
@@ -554,10 +557,10 @@ class SharelatexProject:
 
 	def get_documents():
 		# ??? Getting all the documents
-		temp = json.dumps({"name":"getRootDocumentsList"})	
+		temp = json.dumps({"name":"getRootDocumentsList"})
 		#r = ws_session.send("5:3+::"+temp)
 		#r = ws_session.recv()
-		#temp = json.loads(r[r.find("+")+1:len(r)])	
+		#temp = json.loads(r[r.find("+")+1:len(r)])
 		#data = temp[1]
 
 
